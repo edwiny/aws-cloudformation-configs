@@ -1,0 +1,119 @@
+Parameters:
+  CidrBlock:
+    Type: String
+  CidrBlockSubnet:
+    Type: String
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 
+        Ref: CidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+
+  InternetGateway:
+      Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-southeast-2a
+      VpcId: !Ref VPC
+      CidrBlock: 
+        Ref: CidrBlockSubnet
+      MapPublicIpOnLaunch: true
+
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref RouteTable
+
+
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetA
+
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "Internet Group"
+      GroupDescription: "SSH and Web traffic in, all traffic out."
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+
+  WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-a69c4dc4 #official debian stretch
+      InstanceType: t1.micro
+      SecurityGroupIds:
+        - Ref: WebServerSecurityGroup
+      SubnetId: !Ref SubnetA
+      KeyName: <todo: add keypair name here>
+      UserData:
+        Fn::Base64: !Sub |
+          #!bin/bash -xe
+          apt-get update 
+          apt-get -y install python-setuptools
+          easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+          /usr/local/bin/cfn-init -v --stack ${AWS::StackId} --resource WebServer --region ${AWS::Region}
+          /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource WebServer --region ${AWS::Region}
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          default:
+            [ docker ]
+        docker:
+          commands:
+            'a_get_certificates':
+              command: 'sudo apt-get update && sudo apt-get -y install apt-transport-https ca-certificates curl gnupg-agent software-properties-common'
+            'b_set_gpg_key':
+              command: 'curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -'
+            'c_add_docker_repo':
+              command: 'sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian stretch stable"'
+            'd_update_aptget':
+              command: 'sudo apt-get update'
+            'e_install_docker':
+              command: 'sudo apt-get -y install docker-ce'
+            'f_create_service':
+              command: 'sudo service docker start'
+
+
+        
+        
